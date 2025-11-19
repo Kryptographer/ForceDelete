@@ -288,6 +288,11 @@ async function prepareForDeletion(folderPath, progressCallback = () => {}) {
  * @returns {Promise<boolean>} - true if deleted, false if failed
  */
 async function forceDeleteFile(filePath) {
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    return true; // Already deleted
+  }
+
   // Method 1: Standard fs.unlinkSync
   try {
     fs.unlinkSync(filePath);
@@ -296,11 +301,27 @@ async function forceDeleteFile(filePath) {
     // Continue to next method
   }
 
-  if (process.platform !== 'win32') {
-    return false; // No more methods on non-Windows
+  // Method 2: fs.rmSync (Node.js 14.14.0+)
+  try {
+    fs.rmSync(filePath, { force: true });
+    return true;
+  } catch (e) {
+    // Continue to next method
   }
 
-  // Method 2: Remove attributes and try again
+  // For non-Windows, try rm -f as fallback
+  if (process.platform !== 'win32') {
+    try {
+      execSync(`rm -f "${filePath}"`, { stdio: 'ignore', timeout: 500 });
+      return !fs.existsSync(filePath);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Windows-specific methods below
+
+  // Method 3: Remove attributes and try again
   try {
     execSync(`attrib -r -s -h "${filePath}"`, { stdio: 'ignore', timeout: 300, windowsHide: true });
     fs.unlinkSync(filePath);
@@ -309,22 +330,22 @@ async function forceDeleteFile(filePath) {
     // Continue
   }
 
-  // Method 3: del command
+  // Method 4: del command
   try {
     execSync(`del /f /q "${filePath}"`, { stdio: 'ignore', timeout: 500, windowsHide: true });
-    return true;
+    return !fs.existsSync(filePath);
   } catch (e) {
     // Continue
   }
 
-  // Method 4: Take ownership and grant permissions, then delete
+  // Method 5: Take ownership and grant permissions, then delete
   try {
     execSync(`takeown /f "${filePath}" && icacls "${filePath}" /grant Everyone:F && del /f /q "${filePath}"`, {
       stdio: 'ignore',
       timeout: 2000,
       windowsHide: true
     });
-    return true;
+    return !fs.existsSync(filePath);
   } catch (e) {
     // All methods failed
   }
@@ -338,34 +359,55 @@ async function forceDeleteFile(filePath) {
  * @returns {Promise<boolean>} - true if deleted, false if failed
  */
 async function forceDeleteDirectory(dirPath) {
-  // Method 1: Standard fs.rmdirSync
+  // Check if directory exists
+  if (!fs.existsSync(dirPath)) {
+    return true; // Already deleted
+  }
+
+  // Method 1: Standard fs.rmdirSync (for empty directories)
   try {
     fs.rmdirSync(dirPath);
     return true;
   } catch (e) {
-    // Continue
+    // Directory might not be empty, continue to other methods
   }
 
+  // Method 2: fs.rmSync with recursive option (Node.js 14.14.0+)
+  try {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+    return true;
+  } catch (e) {
+    // Continue to platform-specific methods
+  }
+
+  // For non-Windows, try rm -rf as fallback
   if (process.platform !== 'win32') {
-    return false;
+    try {
+      execSync(`rm -rf "${dirPath}"`, { stdio: 'ignore', timeout: 2000 });
+      return !fs.existsSync(dirPath);
+    } catch (e) {
+      return false;
+    }
   }
 
-  // Method 2: rmdir command
+  // Windows-specific methods below
+
+  // Method 3: rmdir command
   try {
     execSync(`rmdir /s /q "${dirPath}"`, { stdio: 'ignore', timeout: 1000, windowsHide: true });
-    return true;
+    return !fs.existsSync(dirPath);
   } catch (e) {
     // Continue
   }
 
-  // Method 3: Take ownership and delete
+  // Method 4: Take ownership and delete
   try {
     execSync(`takeown /f "${dirPath}" /r /d y && icacls "${dirPath}" /grant Everyone:F /t && rmdir /s /q "${dirPath}"`, {
       stdio: 'ignore',
       timeout: 3000,
       windowsHide: true
     });
-    return true;
+    return !fs.existsSync(dirPath);
   } catch (e) {
     // All methods failed
   }
