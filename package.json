@@ -1,6 +1,6 @@
 {
   "name": "folder-deleter",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Advanced folder force deletion tool with ownership takeover, permission management, and process handle termination",
   "main": "main.js",
   "scripts": {
