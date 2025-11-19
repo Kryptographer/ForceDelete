@@ -1,0 +1,120 @@
+================================================================================
+                    FOLDER FORCE DELETER - QUICK START
+================================================================================
+
+BUILD THE PORTABLE EXE:
+-----------------------
+1. Double-click: build-portable.bat
+2. Wait 2-5 minutes for the build to complete
+3. Find your portable exe in: dist\FolderForceDeleter-Portable.exe
+
+OR manually:
+  > npm install
+  > npm run build
+
+
+WHAT YOU GET:
+-------------
+• FolderForceDeleter-Portable.exe (150-200 MB)
+• Single file - no installation needed
+• Multi-threaded fast deletion
+• Dark themed UI
+• Works on Windows 10/11 (64-bit)
+
+
+USING THE PORTABLE EXE:
+-----------------------
+1. Copy FolderForceDeleter-Portable.exe anywhere you want
+2. Double-click to run (or right-click → Run as Administrator)
+3. Click BROWSE to select a folder
+4. Click FORCE DELETE to remove it permanently
+5. Done!
+
+
+ADMIN RIGHTS:
+-------------
+For best results, run as administrator:
+  Right-click → Run as administrator
+
+This allows the app to:
+  ✓ Delete protected system folders
+  ✓ Take ownership of locked files
+  ✓ Remove readonly/hidden/system files
+  ✓ Use advanced deletion methods
+
+
+SHARING THE EXE:
+----------------
+You can share FolderForceDeleter-Portable.exe with anyone:
+  ✓ No installation required
+  ✓ Works immediately
+  ✓ Single file to distribute
+  ✓ ~150-200 MB file size
+
+
+TROUBLESHOOTING:
+----------------
+Build fails?
+  → Make sure Node.js is installed
+  → Run: npm install electron-builder
+  → Try again
+
+Windows blocks the exe?
+  → Right-click → Properties → Unblock
+  → Or run as administrator
+
+Some files won't delete?
+  → Run the exe as administrator
+  → Some system files are protected by Windows
+
+
+FEATURES:
+---------
+• Multi-threaded deletion (uses all CPU cores)
+• Real-time progress with percentage
+• Status bar showing admin status
+• Dark themed UI (Teenage Engineering/Tesla style)
+• Handles locked and protected files
+• Force takes ownership when needed
+
+
+PERFORMANCE:
+------------
+1,000 files     →  1-2 seconds
+10,000 files    →  5-10 seconds
+100,000 files   →  30-60 seconds
+
+Speed depends on:
+  • Number of CPU cores
+  • File sizes
+  • Disk speed
+  • Admin rights
+
+
+FILES INCLUDED IN BUILD:
+-------------------------
+build-portable.bat          - Quick build script
+build-portable.ps1          - PowerShell build script
+BUILD.md                    - Detailed build documentation
+README.md                   - Full project documentation
+
+
+SUPPORT:
+--------
+For issues or questions, check:
+  • BUILD.md for build problems
+  • README.md for usage help
+  • MULTITHREADING.md for performance details
+  • PERFORMANCE.md for optimization info
+
+
+================================================================================
+                              IMPORTANT WARNING
+================================================================================
+
+This app PERMANENTLY deletes folders and all their contents.
+There is NO UNDO. Be careful what you delete!
+
+Always double-check the folder path before clicking FORCE DELETE.
+
+================================================================================

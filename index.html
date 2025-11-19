@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Folder Force Deleter</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="app-header">
+            <h1>FORCE DELETE</h1>
+            <p>Browse for a folder and permanently remove it from your system</p>
+        </header>
+
+        <main class="app-main">
+            <div class="content-box">
+                <div class="folder-selection">
+                    <div class="input-group">
+                        <input type="text" id="folderPath" placeholder="No folder selected" readonly>
+                        <button id="browseBtn" class="btn btn-browse">
+                            BROWSE
+                        </button>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="deleteBtn" class="btn btn-delete" disabled>
+                        FORCE DELETE
+                    </button>
+                </div>
+
+                <div class="progress" id="progressBox" style="display: none;">
+                    <div class="progress-header">
+                        <span id="progressText">Deleting...</span>
+                        <span id="progressPercent" class="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+
+                <div class="result" id="resultBox" style="display: none;">
+                    <div class="result-content" id="resultContent"></div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="status-bar">
+            <div class="status-left">
+                <span id="statusText">READY</span>
+            </div>
+            <div class="status-right">
+                <span id="adminStatus">ADMIN: NO</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

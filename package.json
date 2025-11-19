@@ -1,0 +1,53 @@
+{
+  "name": "folder-deleter",
+  "version": "1.0.0",
+  "description": "An Electron app to browse and force delete folders",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "admin": "powershell -Command \"Start-Process cmd -ArgumentList '/c cd %cd% && npm start' -Verb RunAs\"",
+    "build": "electron-builder --win portable",
+    "build-installer": "electron-builder --win nsis"
+  },
+  "keywords": [
+    "electron",
+    "folder",
+    "delete",
+    "file-manager"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.folderdeleter.app",
+    "productName": "Folder Force Deleter",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "portable": {
+      "artifactName": "FolderForceDeleter-Portable.exe"
+    },
+    "files": [
+      "**/*",
+      "!build",
+      "!node_modules",
+      "node_modules/electron/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
