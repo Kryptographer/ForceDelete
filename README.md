@@ -5,8 +5,11 @@ An Electron application that allows you to browse for folders and force delete t
 ## Features
 
 - **Multi-threaded deletion** - Uses all CPU cores for blazing fast deletion
+- **Comprehensive ownership takeover** - Recursively takes ownership of entire folder structure
+- **Full permission management** - Grants necessary permissions to all files and subfolders
+- **Process handle detection & termination** - Automatically finds and closes processes with file locks
+- **File attribute removal** - Strips read-only, system, and hidden attributes
 - **Browse for folders** using native file dialog
-- **Force delete** folders with ownership takeover
 - **Real-time progress tracking** with percentage and item counts
 - **Status bar** showing operation status and admin privileges
 - **Folder information** display (size, file count)
@@ -14,6 +17,7 @@ An Electron application that allows you to browse for folders and force delete t
 - **Safety warnings** with custom themed confirmation dialogs
 - **Non-blocking UI** - never freezes during deletion
 - **Cross-platform** support (Windows, macOS, Linux)
+- **Standalone PowerShell script** - Command-line force deletion tool
 
 ## Installation
 
@@ -57,6 +61,29 @@ npm run admin
 
 **Note:** Some protected folders may require administrator privileges to delete.
 
+### Command-Line Usage (PowerShell Script)
+
+For command-line force deletion with all advanced features:
+
+**PowerShell:**
+```powershell
+.\force-delete.ps1 -Path "C:\path\to\folder"
+```
+
+**Batch file wrapper:**
+```bash
+force-delete.bat "C:\path\to\folder"
+```
+
+The standalone script performs the same comprehensive deletion process:
+1. Finds and terminates processes with open file handles
+2. Takes ownership of all files and subfolders
+3. Grants full permissions
+4. Removes file attributes
+5. Deletes the folder
+
+**Requires Administrator privileges**
+
 ## Development
 
 For development with DevTools enabled:
@@ -74,25 +101,34 @@ npm run dev
 
 ### Multi-Threaded Force Delete
 
-The app uses a 3-phase deletion process:
+The app uses a 4-phase deletion process:
 
-**Phase 1: Scanning** (10%)
+**Phase 0: Preparation** (0-10%) - Windows Only
+- **Take Ownership**: Recursively takes ownership of entire folder structure using `takeown /f /r`
+- **Grant Permissions**: Grants full control permissions to everyone using `icacls /grant Everyone:F /t`
+- **Remove Attributes**: Strips read-only, system, and hidden attributes using `attrib -r -s -h /s`
+- **Close Handles**: Detects processes with open file handles using PowerShell and `openfiles`
+- **Terminate Processes**: Gracefully terminates (or force kills) processes blocking deletion
+- **Wait for Release**: Allows time for file handles to fully release
+
+**Phase 1: Scanning** (10-20%)
 - Scans entire folder structure
 - Builds list of all files to delete
 - Non-blocking with event loop yielding
 
-**Phase 2: Parallel Deletion** (10-95%)
+**Phase 2: Parallel Deletion** (20-95%)
 - Detects CPU core count (up to 8 threads)
 - Splits files into equal batches
 - Each worker thread deletes its batch in parallel
 - Real-time progress updates as batches complete
-- Uses multiple fallback methods:
+- Uses multiple fallback methods per file:
   1. Node.js `fs.unlinkSync()` (fastest)
-  2. Windows `del /f /q` command
-  3. `takeown + icacls` (last resort for protected files)
+  2. Remove attributes + retry
+  3. Windows `del /f /q` command
+  4. `takeown + icacls + del` (last resort for stubborn files)
 
 **Phase 3: Cleanup** (95-100%)
-- Removes empty directories
+- Removes empty directories (deepest first)
 - Cleans up root folder
 - Reports final statistics
 

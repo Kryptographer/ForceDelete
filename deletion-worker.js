@@ -2,6 +2,7 @@ const { parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const windowsUtils = require('./windows-utils');
 
 // Worker thread for parallel deletion
 async function deleteItems(items) {
@@ -10,63 +11,39 @@ async function deleteItems(items) {
 
   for (const item of items) {
     try {
-      const stats = fs.statSync(item);
-      
-      // Quick attribute removal
-      if (process.platform === 'win32') {
-        try {
-          execSync(`attrib -r -s -h "${item}"`, { stdio: 'ignore', timeout: 300 });
-        } catch (e) {
-          // Continue
-        }
+      // Check if item still exists (might have been deleted by parent directory deletion)
+      if (!fs.existsSync(item)) {
+        deleted++;
+        continue;
       }
 
+      const stats = fs.statSync(item);
+
       if (stats.isDirectory()) {
-        // Try to delete empty directory
-        try {
-          fs.rmdirSync(item);
+        // Use enhanced directory deletion
+        const success = await windowsUtils.forceDeleteDirectory(item);
+        if (success) {
           deleted++;
-        } catch (e) {
-          // Try command line
-          if (process.platform === 'win32') {
-            try {
-              execSync(`rmdir /s /q "${item}"`, { stdio: 'ignore', timeout: 1000 });
-              deleted++;
-            } catch (cmdError) {
-              failed++;
-            }
-          } else {
-            failed++;
-          }
+        } else {
+          failed++;
         }
       } else {
-        // Delete file
-        try {
-          fs.unlinkSync(item);
+        // Use enhanced file deletion
+        const success = await windowsUtils.forceDeleteFile(item);
+        if (success) {
           deleted++;
-        } catch (e) {
-          // Try command line
-          if (process.platform === 'win32') {
-            try {
-              execSync(`del /f /q "${item}"`, { stdio: 'ignore', timeout: 500 });
-              deleted++;
-            } catch (cmdError) {
-              // Last resort with takeown
-              try {
-                execSync(`takeown /f "${item}" && icacls "${item}" /grant administrators:F && del /f /q "${item}"`, 
-                  { stdio: 'ignore', timeout: 1500 });
-                deleted++;
-              } catch (finalError) {
-                failed++;
-              }
-            }
-          } else {
-            failed++;
-          }
+        } else {
+          failed++;
         }
       }
     } catch (error) {
-      failed++;
+      // Item doesn't exist or can't be accessed
+      if (error.code === 'ENOENT') {
+        // Already deleted
+        deleted++;
+      } else {
+        failed++;
+      }
     }
   }
 

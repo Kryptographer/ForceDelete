@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
 const os = require('os');
+const windowsUtils = require('./windows-utils');
 
 let mainWindow;
 
@@ -197,8 +198,29 @@ async function forceDeleteFolderWithProgress(folderPath, progressCallback) {
     throw new Error('Path is not a directory');
   }
 
+  // Phase 0: Preparation (Windows only - take ownership, grant permissions, close handles)
+  if (process.platform === 'win32') {
+    progressCallback({ stage: 'prepare', percent: 0, message: 'Preparing folder for deletion...' });
+
+    const prepResult = await windowsUtils.prepareForDeletion(folderPath, (progress) => {
+      progressCallback({ stage: 'prepare', percent: 5, message: progress.message });
+    });
+
+    if (prepResult.details.handles && prepResult.details.handles.terminatedProcesses.length > 0) {
+      const procCount = prepResult.details.handles.terminatedProcesses.length;
+      progressCallback({
+        stage: 'prepare',
+        percent: 8,
+        message: `Closed ${procCount} process(es) with file locks`
+      });
+    }
+
+    // Wait for handles to fully release
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
   // Phase 1: Scan all items
-  progressCallback({ stage: 'scanning', percent: 0, message: 'Scanning folder structure...' });
+  progressCallback({ stage: 'scanning', percent: 10, message: 'Scanning folder structure...' });
   const allItems = await scanAllItems(folderPath);
   
   if (allItems.length === 0) {
@@ -276,16 +298,9 @@ async function forceDeleteFolderWithProgress(folderPath, progressCallback) {
 
   // Final cleanup - remove root folder
   try {
-    fs.rmdirSync(folderPath);
+    await windowsUtils.forceDeleteDirectory(folderPath);
   } catch (e) {
-    if (process.platform === 'win32') {
-      const { execSync } = require('child_process');
-      try {
-        execSync(`rmdir /s /q "${folderPath}"`, { stdio: 'ignore', timeout: 2000 });
-      } catch (cmdError) {
-        console.warn('Could not remove root folder:', e.message);
-      }
-    }
+    console.warn('Could not remove root folder:', e.message);
   }
 
   progressCallback({ 
@@ -363,17 +378,9 @@ async function removeEmptyDirectories(dirPath) {
   // Remove directories
   for (const dir of dirs) {
     try {
-      fs.rmdirSync(dir);
+      await windowsUtils.forceDeleteDirectory(dir);
     } catch (error) {
-      // Directory not empty or other error
-      if (process.platform === 'win32') {
-        try {
-          const { execSync } = require('child_process');
-          execSync(`rmdir /s /q "${dir}"`, { stdio: 'ignore', timeout: 500 });
-        } catch (e) {
-          // Skip
-        }
-      }
+      // Skip if can't delete
     }
   }
 }

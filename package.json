@@ -1,7 +1,7 @@
 {
   "name": "folder-deleter",
-  "version": "1.0.0",
-  "description": "An Electron app to browse and force delete folders",
+  "version": "2.0.0",
+  "description": "Advanced folder force deletion tool with ownership takeover, permission management, and process handle termination",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
