@@ -2,6 +2,84 @@
 
 All notable changes to Folder Force Deleter will be documented in this file.
 
+## [3.0.0] - 2026-01-12
+
+### Added
+- **Drag & Drop Support**
+  - Drop folders directly onto the application window
+  - Visual feedback during drag operations
+  - Works alongside the browse button
+
+- **Recent Folders**
+  - Quick access to recently deleted folder paths
+  - Automatically remembers last 10 folders
+  - One-click selection from recent list
+  - Clear history option available
+
+- **Dry Run / Preview Mode**
+  - Preview what will be deleted without actually deleting
+  - See total files, files to delete, and excluded files
+  - Sample file list preview before deletion
+  - Toggle dry run mode in options panel
+
+- **Exclusion Patterns**
+  - Skip files matching glob patterns (*.log, *.tmp, etc.)
+  - Patterns saved and persist across sessions
+  - Support for wildcards (* and ?)
+  - Preview shows excluded files separately
+
+- **File Logging & Audit Trail**
+  - All deletion operations logged to file
+  - Logs stored in app data directory
+  - Includes timestamps, success/failure status
+  - Log file location shown after deletion
+  - Detailed error information for failures
+
+- **Preview Button**
+  - Scan folder and see what will be deleted
+  - Shows statistics: total, to delete, excluded
+  - Displays sample of affected files
+  - Works with exclusion patterns
+
+### Improved
+- **Worker Thread Timeout**
+  - 60-second timeout prevents hanging workers
+  - Graceful timeout handling with fallback
+  - Better error recovery for stuck operations
+
+- **Error Reporting**
+  - Detailed failure information in logs
+  - Shows count of failed items
+  - Log file path displayed after deletion
+  - Warning state for partial failures
+
+- **UI Enhancements**
+  - Collapsible options panel
+  - Preview results panel with statistics
+  - Warning result state (yellow) for partial success
+  - Version number in status bar
+  - Larger window for better usability (900x750)
+  - Improved animations and transitions
+
+- **Code Quality**
+  - Removed ~100 lines of unused legacy code
+  - Better separation of concerns
+  - Centralized configuration
+  - Improved async patterns
+
+### Changed
+- Window size increased to 900x750 (from 800x650)
+- Options are now in a collapsible panel
+- Settings persist in app data directory
+- Version bumped to 3.0.0
+
+### Technical Details
+- Settings stored in Electron's userData path
+- Logs stored in userData/logs directory
+- Glob patterns converted to regex for matching
+- Worker timeout of 60 seconds (configurable)
+- Maximum 10 recent folders stored
+
 ## [2.0.1] - 2025-11-19
 
 ### Fixed

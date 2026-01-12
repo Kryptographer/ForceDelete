@@ -7,11 +7,20 @@ const windowsUtils = require('./windows-utils');
 
 let mainWindow;
 
+// Configuration
+const CONFIG = {
+  maxThreads: 8,
+  workerTimeout: 60000, // 60 seconds timeout for workers
+  maxRecentFolders: 10,
+  logDir: path.join(app.getPath('userData'), 'logs'),
+  settingsFile: path.join(app.getPath('userData'), 'settings.json')
+};
+
 // Request admin privileges on Windows
 let isAdmin = false;
 if (process.platform === 'win32') {
   const { execSync } = require('child_process');
-  
+
   // Check if running as admin
   try {
     execSync('net session', { stdio: 'ignore' });
@@ -23,12 +32,105 @@ if (process.platform === 'win32') {
   }
 }
 
+// Ensure log directory exists
+function ensureLogDir() {
+  if (!fs.existsSync(CONFIG.logDir)) {
+    fs.mkdirSync(CONFIG.logDir, { recursive: true });
+  }
+}
+
+// Load settings
+function loadSettings() {
+  try {
+    if (fs.existsSync(CONFIG.settingsFile)) {
+      return JSON.parse(fs.readFileSync(CONFIG.settingsFile, 'utf8'));
+    }
+  } catch (e) {
+    console.warn('Could not load settings:', e.message);
+  }
+  return { recentFolders: [], exclusionPatterns: [] };
+}
+
+// Save settings
+function saveSettings(settings) {
+  try {
+    const dir = path.dirname(CONFIG.settingsFile);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(CONFIG.settingsFile, JSON.stringify(settings, null, 2));
+  } catch (e) {
+    console.warn('Could not save settings:', e.message);
+  }
+}
+
+// Add to recent folders
+function addRecentFolder(folderPath) {
+  const settings = loadSettings();
+  const recent = settings.recentFolders || [];
+
+  // Remove if already exists
+  const index = recent.indexOf(folderPath);
+  if (index > -1) {
+    recent.splice(index, 1);
+  }
+
+  // Add to beginning
+  recent.unshift(folderPath);
+
+  // Keep only last N folders
+  settings.recentFolders = recent.slice(0, CONFIG.maxRecentFolders);
+  saveSettings(settings);
+}
+
+// Logging utility
+class DeletionLogger {
+  constructor(folderPath) {
+    ensureLogDir();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeName = path.basename(folderPath).replace(/[^a-z0-9]/gi, '_');
+    this.logFile = path.join(CONFIG.logDir, `deletion_${safeName}_${timestamp}.log`);
+    this.entries = [];
+    this.startTime = Date.now();
+  }
+
+  log(level, message, details = null) {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      details
+    };
+    this.entries.push(entry);
+    const logLine = `[${entry.timestamp}] [${level}] ${message}${details ? ' | ' + JSON.stringify(details) : ''}\n`;
+    fs.appendFileSync(this.logFile, logLine);
+  }
+
+  info(message, details) { this.log('INFO', message, details); }
+  warn(message, details) { this.log('WARN', message, details); }
+  error(message, details) { this.log('ERROR', message, details); }
+
+  getSummary() {
+    const duration = Date.now() - this.startTime;
+    const errors = this.entries.filter(e => e.level === 'ERROR');
+    const warnings = this.entries.filter(e => e.level === 'WARN');
+    return {
+      logFile: this.logFile,
+      duration,
+      totalEntries: this.entries.length,
+      errors: errors.length,
+      warnings: warnings.length,
+      errorDetails: errors.slice(0, 10).map(e => e.message)
+    };
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 650,
-    minWidth: 700,
-    minHeight: 550,
+    width: 900,
+    height: 750,
+    minWidth: 750,
+    minHeight: 600,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -43,7 +145,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -72,20 +174,25 @@ ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
   });
-  
+
   if (!result.canceled && result.filePaths.length > 0) {
     return result.filePaths[0];
   }
   return null;
 });
 
-ipcMain.handle('force-delete-folder', async (event, folderPath) => {
+ipcMain.handle('force-delete-folder', async (event, folderPath, options = {}) => {
   try {
-    await forceDeleteFolderWithProgress(folderPath, (progress) => {
-      // Send progress updates to renderer
+    const result = await forceDeleteFolderWithProgress(folderPath, options, (progress) => {
       event.sender.send('delete-progress', progress);
     });
-    return { success: true };
+
+    // Add to recent folders on success
+    if (result.success && !options.dryRun) {
+      addRecentFolder(folderPath);
+    }
+
+    return result;
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -104,6 +211,103 @@ ipcMain.handle('check-admin', async () => {
   return { isAdmin };
 });
 
+ipcMain.handle('get-recent-folders', async () => {
+  const settings = loadSettings();
+  // Filter out folders that no longer exist
+  const existing = (settings.recentFolders || []).filter(f => fs.existsSync(f));
+  return existing;
+});
+
+ipcMain.handle('clear-recent-folders', async () => {
+  const settings = loadSettings();
+  settings.recentFolders = [];
+  saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('get-exclusion-patterns', async () => {
+  const settings = loadSettings();
+  return settings.exclusionPatterns || [];
+});
+
+ipcMain.handle('save-exclusion-patterns', async (event, patterns) => {
+  const settings = loadSettings();
+  settings.exclusionPatterns = patterns;
+  saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('preview-deletion', async (event, folderPath, exclusionPatterns = []) => {
+  try {
+    const preview = await previewDeletion(folderPath, exclusionPatterns);
+    return { success: true, preview };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Preview what will be deleted
+async function previewDeletion(folderPath, exclusionPatterns = []) {
+  if (!fs.existsSync(folderPath)) {
+    throw new Error('Folder does not exist');
+  }
+
+  const stats = fs.statSync(folderPath);
+  if (!stats.isDirectory()) {
+    throw new Error('Path is not a directory');
+  }
+
+  const items = await scanAllItems(folderPath);
+  const excluded = [];
+  const toDelete = [];
+
+  for (const item of items) {
+    if (shouldExclude(item, folderPath, exclusionPatterns)) {
+      excluded.push(item);
+    } else {
+      toDelete.push(item);
+    }
+  }
+
+  return {
+    total: items.length,
+    toDelete: toDelete.length,
+    excluded: excluded.length,
+    excludedFiles: excluded.slice(0, 20), // Show first 20 excluded
+    sampleFiles: toDelete.slice(0, 20) // Show first 20 to delete
+  };
+}
+
+// Check if file should be excluded based on patterns
+function shouldExclude(filePath, basePath, patterns) {
+  if (!patterns || patterns.length === 0) return false;
+
+  const relativePath = path.relative(basePath, filePath);
+  const fileName = path.basename(filePath);
+
+  for (const pattern of patterns) {
+    if (!pattern.trim()) continue;
+
+    // Convert glob pattern to regex
+    const regex = globToRegex(pattern.trim());
+
+    if (regex.test(relativePath) || regex.test(fileName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Convert glob pattern to regex
+function globToRegex(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
 async function calculateFolderInfo(folderPath) {
   if (!fs.existsSync(folderPath)) {
     throw new Error('Folder does not exist');
@@ -118,30 +322,27 @@ async function calculateFolderInfo(folderPath) {
   let fileCount = 0;
   let folderCount = 0;
   let itemsProcessed = 0;
-  const MAX_ITEMS = 10000; // Prevent hanging on huge folders
-  const MAX_DEPTH = 20; // Prevent infinite recursion
+  const MAX_ITEMS = 10000;
+  const MAX_DEPTH = 20;
 
   function calculateDir(dirPath, depth = 0) {
-    // Stop if we've processed too many items or gone too deep
     if (itemsProcessed >= MAX_ITEMS || depth >= MAX_DEPTH) {
       return;
     }
 
     try {
       const items = fs.readdirSync(dirPath, { withFileTypes: true });
-      
+
       for (const item of items) {
         if (itemsProcessed >= MAX_ITEMS) break;
-        
+
         const itemPath = path.join(dirPath, item.name);
         itemsProcessed++;
-        
+
         try {
           if (item.isDirectory()) {
             folderCount++;
-            // Use async-like behavior by yielding occasionally
             if (itemsProcessed % 100 === 0) {
-              // Allow event loop to process
               setImmediate(() => {});
             }
             calculateDir(itemPath, depth + 1);
@@ -155,23 +356,20 @@ async function calculateFolderInfo(folderPath) {
             }
           }
         } catch (error) {
-          // Skip items we can't access
           console.warn(`Warning: Could not access ${itemPath}`);
         }
       }
     } catch (error) {
-      // Skip directories we can't read
       console.warn(`Warning: Could not read directory ${dirPath}`);
     }
   }
 
-  // Start calculation with timeout protection
   const startTime = Date.now();
-  const TIMEOUT = 5000; // 5 second timeout
-  
+  const TIMEOUT = 5000;
+
   try {
     calculateDir(folderPath, 0);
-    
+
     const elapsed = Date.now() - startTime;
     if (elapsed > TIMEOUT) {
       console.warn('Folder info calculation timed out');
@@ -180,151 +378,253 @@ async function calculateFolderInfo(folderPath) {
     console.warn(`Warning: Error calculating folder info: ${error.message}`);
   }
 
-  return { 
-    size: totalSize, 
-    files: fileCount, 
+  return {
+    size: totalSize,
+    files: fileCount,
     folders: folderCount,
     limited: itemsProcessed >= MAX_ITEMS
   };
 }
 
-async function forceDeleteFolderWithProgress(folderPath, progressCallback) {
+async function forceDeleteFolderWithProgress(folderPath, options = {}, progressCallback) {
+  const { dryRun = false, exclusionPatterns = [] } = options;
+  const logger = new DeletionLogger(folderPath);
+
+  logger.info('Starting deletion process', {
+    folderPath,
+    dryRun,
+    exclusionPatterns,
+    isAdmin,
+    platform: process.platform
+  });
+
   if (!fs.existsSync(folderPath)) {
+    logger.error('Folder does not exist');
     throw new Error('Folder does not exist');
   }
 
   const stats = fs.statSync(folderPath);
   if (!stats.isDirectory()) {
+    logger.error('Path is not a directory');
     throw new Error('Path is not a directory');
   }
 
-  // Phase 0: Preparation (Windows only - take ownership, grant permissions, close handles)
-  if (process.platform === 'win32') {
+  // Phase 0: Preparation (Windows only)
+  if (process.platform === 'win32' && !dryRun) {
     progressCallback({ stage: 'prepare', percent: 0, message: 'Preparing folder for deletion...' });
+    logger.info('Starting Windows preparation phase');
 
-    const prepResult = await windowsUtils.prepareForDeletion(folderPath, (progress) => {
-      progressCallback({ stage: 'prepare', percent: 5, message: progress.message });
-    });
-
-    if (prepResult.details.handles && prepResult.details.handles.terminatedProcesses.length > 0) {
-      const procCount = prepResult.details.handles.terminatedProcesses.length;
-      progressCallback({
-        stage: 'prepare',
-        percent: 8,
-        message: `Closed ${procCount} process(es) with file locks`
+    try {
+      const prepResult = await windowsUtils.prepareForDeletion(folderPath, (progress) => {
+        progressCallback({ stage: 'prepare', percent: 5, message: progress.message });
+        logger.info(progress.message);
       });
-    }
 
-    // Wait for handles to fully release
-    await new Promise(resolve => setTimeout(resolve, 1000));
+      if (prepResult.details.handles && prepResult.details.handles.terminatedProcesses.length > 0) {
+        const procCount = prepResult.details.handles.terminatedProcesses.length;
+        progressCallback({
+          stage: 'prepare',
+          percent: 8,
+          message: `Closed ${procCount} process(es) with file locks`
+        });
+        logger.info(`Terminated ${procCount} processes with file locks`, {
+          processes: prepResult.details.handles.terminatedProcesses
+        });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e) {
+      logger.warn('Preparation phase had errors', { error: e.message });
+    }
   }
 
   // Phase 1: Scan all items
   progressCallback({ stage: 'scanning', percent: 10, message: 'Scanning folder structure...' });
+  logger.info('Scanning folder structure');
+
   const allItems = await scanAllItems(folderPath);
-  
+
   if (allItems.length === 0) {
-    // Empty directory, just remove it
-    try {
-      fs.rmdirSync(folderPath);
-      progressCallback({ stage: 'complete', percent: 100, message: 'Complete' });
-      return;
-    } catch (error) {
-      throw new Error(`Failed to delete empty directory: ${error.message}`);
+    if (!dryRun) {
+      try {
+        fs.rmdirSync(folderPath);
+        logger.info('Deleted empty directory');
+        progressCallback({ stage: 'complete', percent: 100, message: 'Complete' });
+        return { success: true, summary: logger.getSummary() };
+      } catch (error) {
+        logger.error('Failed to delete empty directory', { error: error.message });
+        throw new Error(`Failed to delete empty directory: ${error.message}`);
+      }
+    } else {
+      progressCallback({ stage: 'complete', percent: 100, message: 'Dry run complete - folder is empty' });
+      return { success: true, dryRun: true, summary: logger.getSummary() };
     }
   }
 
-  const totalItems = allItems.length;
-  progressCallback({ stage: 'scanning', percent: 10, message: `Found ${totalItems} items to delete` });
+  // Filter out excluded items
+  const itemsToDelete = allItems.filter(item => !shouldExclude(item, folderPath, exclusionPatterns));
+  const excludedCount = allItems.length - itemsToDelete.length;
 
-  // Phase 2: Multi-threaded deletion
-  const numThreads = Math.min(os.cpus().length, 8); // Max 8 threads
-  const batchSize = Math.ceil(totalItems / numThreads);
-  
-  progressCallback({ 
-    stage: 'deleting', 
-    percent: 15, 
-    message: `Using ${numThreads} threads for fast deletion...` 
+  if (excludedCount > 0) {
+    logger.info(`Excluded ${excludedCount} items based on patterns`);
+  }
+
+  const totalItems = itemsToDelete.length;
+  progressCallback({
+    stage: 'scanning',
+    percent: 10,
+    message: `Found ${totalItems} items to delete${excludedCount > 0 ? ` (${excludedCount} excluded)` : ''}`
   });
+  logger.info(`Found ${totalItems} items to delete, ${excludedCount} excluded`);
+
+  if (dryRun) {
+    progressCallback({
+      stage: 'complete',
+      percent: 100,
+      message: `Dry run complete - would delete ${totalItems} items`
+    });
+    return {
+      success: true,
+      dryRun: true,
+      wouldDelete: totalItems,
+      excluded: excludedCount,
+      summary: logger.getSummary()
+    };
+  }
+
+  // Phase 2: Multi-threaded deletion with timeout
+  const numThreads = Math.min(os.cpus().length, CONFIG.maxThreads);
+  const batchSize = Math.ceil(totalItems / numThreads);
+
+  progressCallback({
+    stage: 'deleting',
+    percent: 15,
+    message: `Using ${numThreads} threads for fast deletion...`
+  });
+  logger.info(`Starting multi-threaded deletion`, { threads: numThreads, batchSize });
 
   let deletedItems = 0;
   let failedItems = 0;
+  const failedPaths = [];
   const workers = [];
 
-  // Split work into batches
   for (let i = 0; i < numThreads; i++) {
     const start = i * batchSize;
     const end = Math.min(start + batchSize, totalItems);
     if (start >= totalItems) break;
 
-    const batch = allItems.slice(start, end);
-    
+    const batch = itemsToDelete.slice(start, end);
+
     const worker = new Worker(path.join(__dirname, 'deletion-worker.js'), {
       workerData: { items: batch }
     });
 
-    workers.push(new Promise((resolve, reject) => {
+    const workerPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        logger.warn(`Worker ${i} timed out after ${CONFIG.workerTimeout}ms`);
+        reject(new Error(`Worker ${i} timed out`));
+      }, CONFIG.workerTimeout);
+
       worker.on('message', (msg) => {
+        clearTimeout(timeout);
         if (msg.success) {
           deletedItems += msg.result.deleted;
           failedItems += msg.result.failed;
-          
+          if (msg.result.failedPaths) {
+            failedPaths.push(...msg.result.failedPaths);
+          }
+
           const percent = Math.min(95, Math.floor((deletedItems / totalItems) * 100));
           progressCallback({
             stage: 'deleting',
             percent,
             message: `Deleted ${deletedItems} of ${totalItems} items (${failedItems} failed)`
           });
-          
+
           resolve(msg.result);
         } else {
+          logger.error(`Worker ${i} failed`, { error: msg.error });
           reject(new Error(msg.error));
         }
       });
 
-      worker.on('error', reject);
-      worker.on('exit', (code) => {
-        if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
+      worker.on('error', (err) => {
+        clearTimeout(timeout);
+        logger.error(`Worker ${i} error`, { error: err.message });
+        reject(err);
       });
+
+      worker.on('exit', (code) => {
+        clearTimeout(timeout);
+        if (code !== 0) {
+          logger.warn(`Worker ${i} exited with code ${code}`);
+        }
+      });
+    });
+
+    workers.push(workerPromise.catch(err => {
+      logger.warn(`Worker failed but continuing`, { error: err.message });
+      return { deleted: 0, failed: batch.length };
     }));
   }
 
-  // Wait for all workers to complete
   await Promise.all(workers);
+
+  logger.info(`Deletion phase complete`, { deleted: deletedItems, failed: failedItems });
+
+  // Log failed paths
+  if (failedPaths.length > 0) {
+    logger.warn(`Failed to delete ${failedPaths.length} items`, {
+      samples: failedPaths.slice(0, 10)
+    });
+  }
 
   // Phase 3: Clean up empty directories
   progressCallback({ stage: 'cleanup', percent: 96, message: 'Cleaning up directories...' });
+  logger.info('Starting cleanup phase');
+
   await removeEmptyDirectories(folderPath);
 
   // Final cleanup - remove root folder
   try {
     await windowsUtils.forceDeleteDirectory(folderPath);
+    logger.info('Removed root folder');
   } catch (e) {
-    console.warn('Could not remove root folder:', e.message);
+    logger.warn('Could not remove root folder', { error: e.message });
   }
 
-  progressCallback({ 
-    stage: 'complete', 
-    percent: 100, 
-    message: `Complete! Deleted ${deletedItems} items, ${failedItems} failed` 
+  const summary = logger.getSummary();
+
+  progressCallback({
+    stage: 'complete',
+    percent: 100,
+    message: `Complete! Deleted ${deletedItems} items, ${failedItems} failed`,
+    summary
   });
+
+  return {
+    success: failedItems === 0 || deletedItems > 0,
+    deleted: deletedItems,
+    failed: failedItems,
+    excluded: excludedCount,
+    summary
+  };
 }
 
-// Scan all files and directories (depth-first for files, breadth-first for dirs)
 async function scanAllItems(dirPath) {
   const items = [];
   const dirsToScan = [dirPath];
-  
+
   while (dirsToScan.length > 0) {
     const currentDir = dirsToScan.shift();
-    
+
     try {
       const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-      
-      // First collect all files
+
       for (const entry of entries) {
         const fullPath = path.join(currentDir, entry.name);
-        
+
         try {
           if (entry.isFile()) {
             items.push(fullPath);
@@ -335,29 +635,25 @@ async function scanAllItems(dirPath) {
           // Skip inaccessible items
         }
       }
-      
-      // Yield every 100 items
+
       if (items.length % 100 === 0) {
         await new Promise(resolve => setImmediate(resolve));
       }
     } catch (error) {
-      // Skip directories we can't read
       console.warn(`Could not read directory: ${currentDir}`);
     }
   }
-  
+
   return items;
 }
 
-// Remove empty directories after files are deleted
 async function removeEmptyDirectories(dirPath) {
   const dirs = [];
-  
-  // Collect all directories
+
   function collectDirs(currentDir) {
     try {
       const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-      
+
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const fullPath = path.join(currentDir, entry.name);
@@ -369,112 +665,16 @@ async function removeEmptyDirectories(dirPath) {
       // Skip
     }
   }
-  
+
   collectDirs(dirPath);
-  
-  // Sort by depth (deepest first)
+
   dirs.sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
-  
-  // Remove directories
+
   for (const dir of dirs) {
     try {
       await windowsUtils.forceDeleteDirectory(dir);
     } catch (error) {
       // Skip if can't delete
-    }
-  }
-}
-
-async function removeDirectoryRecursiveWithProgress(dirPath, onItemDeleted) {
-  if (fs.existsSync(dirPath)) {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const { execSync } = require('child_process');
-    let itemsProcessed = 0;
-    
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      itemsProcessed++;
-      
-      try {
-        // Take ownership and remove restrictions on Windows (non-recursive, per item)
-        if (process.platform === 'win32') {
-          try {
-            // Quick attribute removal only (no takeown/icacls as they're too slow)
-            execSync(`attrib -r -s -h "${fullPath}"`, { stdio: 'ignore', timeout: 500 });
-          } catch (e) {
-            // Continue anyway
-          }
-        }
-        
-        if (entry.isDirectory()) {
-          await removeDirectoryRecursiveWithProgress(fullPath, onItemDeleted);
-        } else {
-          // Try multiple methods to delete file
-          try {
-            fs.unlinkSync(fullPath);
-          } catch (e) {
-            // Try force delete via command line
-            if (process.platform === 'win32') {
-              try {
-                execSync(`del /f /q "${fullPath}"`, { stdio: 'ignore', timeout: 1000 });
-              } catch (cmdError) {
-                // Last resort - try takeown on this specific file
-                try {
-                  execSync(`takeown /f "${fullPath}" && icacls "${fullPath}" /grant administrators:F && del /f /q "${fullPath}"`, { stdio: 'ignore', timeout: 2000 });
-                } catch (lastError) {
-                  throw e; // Give up on this file
-                }
-              }
-            } else {
-              throw e;
-            }
-          }
-          onItemDeleted();
-        }
-      } catch (error) {
-        // Continue trying to delete other files even if one fails
-        console.warn(`Warning: Could not delete ${fullPath}: ${error.message}`);
-        onItemDeleted(); // Count it anyway to keep progress moving
-      }
-      
-      // Yield to event loop every 20 items
-      if (itemsProcessed % 20 === 0) {
-        await new Promise(resolve => setImmediate(resolve));
-      }
-    }
-    
-    // Try to remove the directory itself
-    try {
-      fs.rmdirSync(dirPath);
-      onItemDeleted();
-    } catch (error) {
-      // Try force delete via command line
-      if (process.platform === 'win32') {
-        try {
-          execSync(`rmdir /s /q "${dirPath}"`, { stdio: 'ignore', timeout: 1000 });
-          onItemDeleted();
-          return;
-        } catch (cmdError) {
-          // Try with takeown
-          try {
-            execSync(`takeown /f "${dirPath}" && icacls "${dirPath}" /grant administrators:F && rmdir /s /q "${dirPath}"`, { stdio: 'ignore', timeout: 2000 });
-            onItemDeleted();
-            return;
-          } catch (lastError) {
-            // Continue to retry
-          }
-        }
-      }
-      
-      // If directory removal fails, try one more time after a short delay
-      await new Promise(resolve => setTimeout(resolve, 50));
-      try {
-        fs.rmdirSync(dirPath);
-        onItemDeleted();
-      } catch (finalError) {
-        console.warn(`Warning: Could not remove directory ${dirPath}: ${finalError.message}`);
-        onItemDeleted(); // Count it anyway
-      }
     }
   }
 }

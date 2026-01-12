@@ -1,23 +1,34 @@
-# Folder Force Deleter
+# Folder Force Deleter v3.0
 
-An Electron application that allows you to browse for folders and force delete them permanently.
+An Electron application that allows you to browse for folders and force delete them permanently with advanced features like drag & drop, preview mode, and exclusion patterns.
 
 ## Features
 
+### Core Features
 - **Multi-threaded deletion** - Uses all CPU cores for blazing fast deletion
 - **Comprehensive ownership takeover** - Recursively takes ownership of entire folder structure
 - **Full permission management** - Grants necessary permissions to all files and subfolders
 - **Process handle detection & termination** - Automatically finds and closes processes with file locks
 - **File attribute removal** - Strips read-only, system, and hidden attributes
+- **Cross-platform** support (Windows, macOS, Linux)
+
+### New in v3.0
+- **Drag & Drop** - Drop folders directly into the app window
+- **Recent Folders** - Quick access to recently deleted paths (remembers last 10)
+- **Preview Mode** - See what will be deleted before confirming
+- **Dry Run Mode** - Simulate deletion without actually removing files
+- **Exclusion Patterns** - Skip files matching patterns (*.log, *.tmp, etc.)
+- **File Logging** - Complete audit trail of all deletion operations
+- **Worker Timeout** - 60-second timeout prevents hanging on stuck files
+
+### UI Features
 - **Browse for folders** using native file dialog
 - **Real-time progress tracking** with percentage and item counts
 - **Status bar** showing operation status and admin privileges
-- **Folder information** display (size, file count)
 - **Dark theme** with Teenage Engineering/Tesla design aesthetic
+- **Collapsible options panel** for advanced settings
 - **Safety warnings** with custom themed confirmation dialogs
 - **Non-blocking UI** - never freezes during deletion
-- **Cross-platform** support (Windows, macOS, Linux)
-- **Standalone PowerShell script** - Command-line force deletion tool
 
 ## Installation
 
@@ -54,12 +65,43 @@ npm run admin
 ```
 
 ### Using the App
-1. Click the **Browse** button to select a folder
-2. View folder information (size and item count)
-3. Click **Force Delete** to permanently delete the selected folder
-4. Confirm the deletion in the warning dialog
+1. **Select a folder** - Click Browse or drag & drop a folder
+2. **Configure options** (optional):
+   - Enable **Dry Run Mode** to preview without deleting
+   - Add **Exclusion Patterns** to skip certain files
+3. **Preview** (optional) - Click Preview to see what will be deleted
+4. **Delete** - Click Force Delete and confirm
 
-**Note:** Some protected folders may require administrator privileges to delete.
+### New Features Guide
+
+#### Drag & Drop
+Simply drag a folder from your file explorer and drop it anywhere in the app window.
+
+#### Preview Mode
+Click the "Preview" button to scan the folder and see:
+- Total number of files
+- Files that will be deleted
+- Files that will be excluded (based on patterns)
+
+#### Dry Run Mode
+1. Click "Options" to expand the options panel
+2. Check "Dry Run Mode"
+3. Click "Force Delete"
+4. The app will simulate deletion and show results without removing files
+
+#### Exclusion Patterns
+Add patterns to skip certain files during deletion:
+```
+*.log
+*.tmp
+node_modules
+.git
+*.bak
+```
+Patterns support `*` (any characters) and `?` (single character) wildcards.
+
+#### Recent Folders
+Recently deleted folders appear automatically. Click any entry to select it again.
 
 ### Command-Line Usage (PowerShell Script)
 
@@ -75,15 +117,6 @@ For command-line force deletion with all advanced features:
 force-delete.bat "C:\path\to\folder"
 ```
 
-The standalone script performs the same comprehensive deletion process:
-1. Finds and terminates processes with open file handles
-2. Takes ownership of all files and subfolders
-3. Grants full permissions
-4. Removes file attributes
-5. Deletes the folder
-
-**Requires Administrator privileges**
-
 ## Development
 
 For development with DevTools enabled:
@@ -94,60 +127,68 @@ npm run dev
 ## How It Works
 
 ### Architecture
-- **Main Process** (`main.js`): Coordinates deletion and spawns worker threads
-- **Worker Threads** (`deletion-worker.js`): Parallel file deletion workers
-- **Renderer Process** (`renderer.js`): Manages the UI and user interactions
+- **Main Process** (`main.js`): Coordinates deletion, manages settings, and spawns worker threads
+- **Worker Threads** (`deletion-worker.js`): Parallel file deletion workers with timeout protection
+- **Renderer Process** (`renderer.js`): Manages the UI, drag & drop, and user interactions
 - **Preload Script** (`preload.js`): Securely exposes main process APIs to the renderer
+- **Windows Utils** (`windows-utils.js`): Platform-specific deletion utilities
 
 ### Multi-Threaded Force Delete
 
 The app uses a 4-phase deletion process:
 
 **Phase 0: Preparation** (0-10%) - Windows Only
-- **Take Ownership**: Recursively takes ownership of entire folder structure using `takeown /f /r`
-- **Grant Permissions**: Grants full control permissions to everyone using `icacls /grant Everyone:F /t`
-- **Remove Attributes**: Strips read-only, system, and hidden attributes using `attrib -r -s -h /s`
-- **Close Handles**: Detects processes with open file handles using PowerShell and `openfiles`
-- **Terminate Processes**: Gracefully terminates (or force kills) processes blocking deletion
-- **Wait for Release**: Allows time for file handles to fully release
+- **Take Ownership**: Recursively takes ownership using `takeown /f /r`
+- **Grant Permissions**: Grants full control using `icacls /grant Everyone:F /t`
+- **Remove Attributes**: Strips read-only, system, hidden attributes
+- **Close Handles**: Detects and terminates processes blocking deletion
 
 **Phase 1: Scanning** (10-20%)
 - Scans entire folder structure
-- Builds list of all files to delete
-- Non-blocking with event loop yielding
+- Applies exclusion patterns
+- Builds list of files to delete
 
 **Phase 2: Parallel Deletion** (20-95%)
-- Detects CPU core count (up to 8 threads)
-- Splits files into equal batches
-- Each worker thread deletes its batch in parallel
-- Real-time progress updates as batches complete
-- Uses multiple fallback methods per file:
-  1. Node.js `fs.unlinkSync()` (fastest)
-  2. Remove attributes + retry
-  3. Windows `del /f /q` command
-  4. `takeown + icacls + del` (last resort for stubborn files)
+- Up to 8 worker threads (based on CPU cores)
+- 60-second timeout per worker
+- Multiple fallback methods per file
+- Real-time progress updates
 
 **Phase 3: Cleanup** (95-100%)
-- Removes empty directories (deepest first)
-- Cleans up root folder
+- Removes empty directories
+- Generates log summary
 - Reports final statistics
 
 ### Performance
 - **1,000 files**: ~1-2 seconds
-- **10,000 files**: ~5-10 seconds  
-- **100,000 files**: ~30-60 seconds (with admin rights)
+- **10,000 files**: ~5-10 seconds
+- **100,000 files**: ~30-60 seconds
 - Speed scales with CPU core count
+
+## File Logging
+
+All deletion operations are logged to:
+- **Windows**: `%APPDATA%/folder-deleter/logs/`
+- **macOS**: `~/Library/Application Support/folder-deleter/logs/`
+- **Linux**: `~/.config/folder-deleter/logs/`
+
+Log files include:
+- Timestamp for each operation
+- Success/failure status
+- Error details for failed items
+- Summary statistics
 
 ## Safety Features
 
 - **Explicit confirmation** required before deletion
+- **Preview mode** to review before deleting
+- **Dry run mode** for safe testing
+- **Exclusion patterns** to protect important files
 - **Clear warnings** about permanent data loss
 - **Path validation** to ensure only directories are deleted
-- **Error handling** with informative messages
+- **Audit logging** for accountability
 
 ## Building Portable Executable
-
-To create a standalone portable .exe file:
 
 ### Quick Build:
 ```bash
@@ -163,7 +204,7 @@ npm run build
 
 **Output**: `dist/FolderForceDeleter-Portable.exe`
 
-See [BUILD.md](BUILD.md) for detailed build instructions and troubleshooting.
+See [BUILD.md](BUILD.md) for detailed build instructions.
 
 ### Build Options:
 - **Portable exe**: `npm run build` (single file, no install)
@@ -172,8 +213,8 @@ See [BUILD.md](BUILD.md) for detailed build instructions and troubleshooting.
 ## Requirements
 
 ### For Running:
-- Windows 10/11 (x64)
-- Administrator rights (recommended)
+- Windows 10/11, macOS, or Linux (x64)
+- Administrator rights (recommended for Windows)
 
 ### For Building:
 - Node.js (v14 or higher)
@@ -186,6 +227,10 @@ After building, you can:
 1. Share the single `FolderForceDeleter-Portable.exe` file
 2. No installation needed by end users
 3. Runs directly on Windows 10/11
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
 
