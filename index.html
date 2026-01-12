@@ -3,33 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Folder Force Deleter</title>
+    <title>Force Delete v3.0</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
         <header class="app-header">
             <h1>FORCE DELETE</h1>
-            <p>Browse for a folder and permanently remove it from your system</p>
+            <p>Permanently remove folders with advanced deletion techniques</p>
         </header>
 
         <main class="app-main">
             <div class="content-box">
+                <!-- Folder Selection -->
                 <div class="folder-selection">
                     <div class="input-group">
-                        <input type="text" id="folderPath" placeholder="No folder selected" readonly>
-                        <button id="browseBtn" class="btn btn-browse">
-                            BROWSE
-                        </button>
+                        <input type="text" id="folderPath" placeholder="Drop folder here or click Browse" readonly>
+                        <button id="browseBtn" class="btn btn-browse">BROWSE</button>
+                    </div>
+                    <div class="drop-zone" id="dropZone">
+                        <div class="drop-zone-content">
+                            <span class="drop-icon">+</span>
+                            <span>Drop folder here</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="actions">
-                    <button id="deleteBtn" class="btn btn-delete" disabled>
-                        FORCE DELETE
-                    </button>
+                <!-- Recent Folders -->
+                <div class="recent-folders" id="recentFoldersSection" style="display: none;">
+                    <div class="section-header">
+                        <h3>RECENT FOLDERS</h3>
+                        <button id="clearRecentBtn" class="btn-link">Clear</button>
+                    </div>
+                    <div class="recent-list" id="recentList"></div>
                 </div>
 
+                <!-- Options Panel -->
+                <div class="options-panel">
+                    <div class="section-header">
+                        <h3>OPTIONS</h3>
+                        <button id="toggleOptionsBtn" class="btn-link">Show</button>
+                    </div>
+                    <div class="options-content" id="optionsContent" style="display: none;">
+                        <div class="option-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="dryRunMode">
+                                <span class="checkbox-custom"></span>
+                                <span>Dry Run Mode</span>
+                                <span class="option-hint">Preview what will be deleted without actually deleting</span>
+                            </label>
+                        </div>
+                        <div class="option-group">
+                            <label>Exclusion Patterns</label>
+                            <span class="option-hint">Files matching these patterns will be skipped (one per line)</span>
+                            <textarea id="exclusionPatterns" placeholder="*.log&#10;*.tmp&#10;node_modules&#10;.git"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="actions">
+                    <button id="previewBtn" class="btn btn-preview" disabled>PREVIEW</button>
+                    <button id="deleteBtn" class="btn btn-delete" disabled>FORCE DELETE</button>
+                </div>
+
+                <!-- Preview Results -->
+                <div class="preview-results" id="previewResults" style="display: none;">
+                    <div class="section-header">
+                        <h3>PREVIEW</h3>
+                    </div>
+                    <div class="preview-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="previewTotal">0</span>
+                            <span class="stat-label">Total Files</span>
+                        </div>
+                        <div class="stat-item stat-delete">
+                            <span class="stat-value" id="previewDelete">0</span>
+                            <span class="stat-label">To Delete</span>
+                        </div>
+                        <div class="stat-item stat-exclude">
+                            <span class="stat-value" id="previewExclude">0</span>
+                            <span class="stat-label">Excluded</span>
+                        </div>
+                    </div>
+                    <div class="preview-files" id="previewFiles"></div>
+                </div>
+
+                <!-- Progress -->
                 <div class="progress" id="progressBox" style="display: none;">
                     <div class="progress-header">
                         <span id="progressText">Deleting...</span>
@@ -40,8 +100,10 @@
                     </div>
                 </div>
 
+                <!-- Result -->
                 <div class="result" id="resultBox" style="display: none;">
                     <div class="result-content" id="resultContent"></div>
+                    <div class="result-details" id="resultDetails" style="display: none;"></div>
                 </div>
             </div>
         </main>
@@ -51,6 +113,7 @@
                 <span id="statusText">READY</span>
             </div>
             <div class="status-right">
+                <span id="versionText">v3.0.0</span>
                 <span id="adminStatus">ADMIN: NO</span>
             </div>
         </footer>
